@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}CDA — Alternator ML Dashboard{% endblock %}
+{% block content %}
+<h1>Confirmatory data analysis</h1>
+<p class="page-sub">Hypothesis-driven checks that either support or undercut the descriptive claims from EDA — including the key label-circularity check below.</p>
+
+<div class="tabs" data-tabs>
+  <button class="tab-btn active" data-tab="anova">ANOVA by risk class</button>
+  <button class="tab-btn" data-tab="corr">Correlation significance</button>
+  <button class="tab-btn" data-tab="vif">Collinearity (VIF)</button>
+  <button class="tab-btn" data-tab="baseline">Rule-based baseline</button>
+  <button class="tab-btn" data-tab="sensitivity">Contamination sensitivity</button>
+</div>
+
+<div class="tab-panel active" data-panel="anova">
+  <div class="card">
+    <h2>One-way ANOVA: does each feature's mean differ across NORMAL / WARNING / HIGH?</h2>
+    <p class="muted">A large F-statistic and p &lt; 0.05 means this feature's mean genuinely shifts across risk states — not just noise.</p>
+    <div id="anovaTable">Loading…</div>
+  </div>
+</div>
+
+<div class="tab-panel" data-panel="corr">
+  <div class="card">
+    <h2>Pearson correlation with significance test</h2>
+    <p class="muted">Checks a specific correlation claim (e.g. the deck's headline MW–Current figure) against this dataset, with a 95% confidence interval.</p>
+    <div class="field-row" style="align-items:flex-end">
+      <div class="field">
+        <label for="corr-x">Feature X</label>
+        <select id="corr-x">
+          <option value="MW" selected>MW</option>
+          <option value="Current_A">Current_A</option>
+          <option value="Power_Factor">Power_Factor</option>
+          <option value="Voltage_kV">Voltage_kV</option>
+          <option value="Calculated_MVA">Calculated_MVA</option>
+          <option value="Load_Percent">Load_Percent</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="corr-y">Feature Y</label>
+        <select id="corr-y">
+          <option value="MW">MW</option>
+          <option value="Current_A" selected>Current_A</option>
+          <option value="Power_Factor">Power_Factor</option>
+          <option value="Voltage_kV">Voltage_kV</option>
+          <option value="Calculated_MVA">Calculated_MVA</option>
+          <option value="Load_Percent">Load_Percent</option>
+        </select>
+      </div>
+      <button id="corr-run">Run test</button>
+    </div>
+    <div id="corrResult" style="margin-top:14px"></div>
+  </div>
+</div>
+
+<div class="tab-panel" data-panel="vif">
+  <div class="card">
+    <h2>Variance Inflation Factor per feature</h2>
+    <p class="muted">VIF &gt; 5 flags problematic collinearity. Calculated_MVA and Load_Percent are exact functions of MW/Current/Voltage, so expect them to score high — that's a caveat on trusting raw Gini importance as a causal signal.</p>
+    <div id="vifTable">Loading…</div>
+  </div>
+</div>
+
+<div class="tab-panel" data-panel="baseline">
+  <div class="card">
+    <h2>Rule-based baseline (no machine learning at all)</h2>
+    <p class="muted">Reconstructs Trip_Risk using only the deterministic setpoint thresholds. If this alone scores near-perfect, a classifier's high F1 mostly reflects rule approximation, not discovery of a hidden pattern.</p>
+    <div id="baselineResult">Loading…</div>
+  </div>
+</div>
+
+<div class="tab-panel" data-panel="sensitivity">
+  <div class="card">
+    <h2>Isolation Forest contamination sensitivity</h2>
+    <p class="muted">The contamination parameter is an analyst prior with no empirically calibrated value in the source data. This shows how the anomaly flag rate and its correlation with actual risk shift as that prior changes.</p>
+    <canvas id="sensitivityChart" height="200"></canvas>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadAnova() {
+  const data = await getJSON("/api/cda/anova");
+  let html = "<table><thead><tr><th>Feature</th><th>F-statistic</th><th>p-value</th><th>Significant (p&lt;0.05)</th></tr></thead><tbody>";
+  data.forEach(r => {
+    html += `<tr><td>${r.feature}</td><td>${r.f_statistic}</td><td>${r.p_value < 0.0001 ? "< 0.0001" : r.p_value.toFixed(4)}</td>
+      <td>${r.significant ? '<span class="badge badge-normal">YES</span>' : '<span class="badge badge-high">NO</span>'}</td></tr>`;
+  });
+  html += "</tbody></table>";
+  document.getElementById("anovaTable").innerHTML = html;
+}
+
+async function runCorrTest() {
+  const x = document.getElementById("corr-x").value;
+  const y = document.getElementById("corr-y").value;
+  document.getElementById("corrResult").innerHTML = '<span class="spinner"></span>Running test…';
+  const data = await getJSON(`/api/cda/correlation_test?x=${x}&y=${y}`);
+  document.getElementById("corrResult").innerHTML = `
+    <div class="grid grid-3">
+      <div class="card stat-card"><div class="stat-label">Pearson r</div><div class="stat-value">${data.r}</div></div>
+      <div class="card stat-card"><div class="stat-label">p-value</div><div class="stat-value">${data.p_value < 0.0001 ? "< 0.0001" : data.p_value.toFixed(4)}</div></div>
+      <div class="card stat-card"><div class="stat-label">95% CI</div><div class="stat-value" style="font-size:18px">[${data.ci_95_low}, ${data.ci_95_high}]</div></div>
+    </div>
+    <p class="muted" style="margin-top:10px">n = ${data.n} observations used.</p>`;
+}
+
+async function loadVif() {
+  const data = await getJSON("/api/cda/vif");
+  let html = "<table><thead><tr><th>Feature</th><th>R²</th><th>VIF</th><th>Flag</th></tr></thead><tbody>";
+  data.forEach(r => {
+    html += `<tr><td>${r.feature}</td><td>${r.r_squared}</td><td>${r.vif === null ? "∞" : r.vif}</td>
+      <td>${r.high_collinearity ? '<span class="badge badge-high">High collinearity</span>' : '<span class="badge badge-normal">OK</span>'}</td></tr>`;
+  });
+  html += "</tbody></table>";
+  document.getElementById("vifTable").innerHTML = html;
+}
+
+async function loadBaseline() {
+  const data = await getJSON("/api/cda/rule_baseline");
+  let rows = Object.entries(data.agreement_by_class).map(([cls, acc]) =>
+    `<div class="card stat-card"><div class="stat-label">${cls} agreement</div><div class="stat-value">${(acc*100).toFixed(1)}%</div></div>`
+  ).join("");
+  document.getElementById("baselineResult").innerHTML = `
+    <div class="grid grid-3">
+      <div class="card stat-card"><div class="stat-label">Overall accuracy</div><div class="stat-value">${(data.overall_accuracy*100).toFixed(1)}%</div></div>
+      ${rows}
+    </div>
+    <div class="callout warn" style="margin-top:14px">${data.interpretation}</div>`;
+}
+
+async function loadSensitivity() {
+  const data = await getJSON("/api/cda/contamination_sensitivity");
+  const ctx = document.getElementById("sensitivityChart");
+  new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: data.map(d => d.contamination),
+      datasets: [
+        { label: "Flagged rate", data: data.map(d => d.flagged_rate), borderColor: "#3fa9f5", yAxisID: "y" },
+        { label: "Correlation with actual risk", data: data.map(d => d.correlation_with_actual_risk), borderColor: "#f2a93b", yAxisID: "y" },
+      ],
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#e6edf3" } } },
+      scales: {
+        x: { title: { display: true, text: "contamination parameter", color: "#9aa5b1" }, ticks: { color: "#9aa5b1" }, grid: { color: "#2a323c" } },
+        y: { ticks: { color: "#9aa5b1" }, grid: { color: "#2a323c" } },
+      },
+    },
+  });
+}
+
+document.getElementById("corr-run").addEventListener("click", runCorrTest);
+
+loadAnova();
+runCorrTest();
+loadVif();
+loadBaseline();
+loadSensitivity();
+</script>
+{% endblock %}

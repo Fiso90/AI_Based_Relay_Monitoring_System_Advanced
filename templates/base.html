@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}3 MW Alternator ML Dashboard{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">3MW</div>
+      <div class="brand-text">
+        <div class="brand-title">Alternator ML</div>
+        <div class="brand-sub">Lifecycle dashboard</div>
+      </div>
+    </div>
+    <nav>
+      <a href="{{ url_for('index') }}" class="nav-item {{ 'active' if active=='overview' }}">
+        <span class="nav-num">0</span> Overview
+      </a>
+      <a href="{{ url_for('eda_page') }}" class="nav-item {{ 'active' if active=='eda' }}">
+        <span class="nav-num">1</span> EDA
+      </a>
+      <a href="{{ url_for('pipeline_page') }}" class="nav-item {{ 'active' if active=='pipeline' }}">
+        <span class="nav-num">2</span> Physics engine
+      </a>
+      <a href="{{ url_for('cda_page') }}" class="nav-item {{ 'active' if active=='cda' }}">
+        <span class="nav-num">3</span> CDA
+      </a>
+      <a href="{{ url_for('train_page') }}" class="nav-item {{ 'active' if active=='train' }}">
+        <span class="nav-num">4</span> Train models
+      </a>
+      <a href="{{ url_for('predict_page') }}" class="nav-item {{ 'active' if active=='predict' }}">
+        <span class="nav-num">5</span> Live predict
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="footer-line">1,000 observations</div>
+      <div class="footer-line">3 MW rated capacity</div>
+    </div>
+  </aside>
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

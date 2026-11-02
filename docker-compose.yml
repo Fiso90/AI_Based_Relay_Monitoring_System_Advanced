@@ -1,0 +1,14 @@
+services:
+  dashboard:
+    build: .
+    container_name: alternator_ml_dashboard
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount models/ so trained artifacts persist across container restarts
+      - ./models:/app/models
+      # Mount data/ so you can swap in a new dataset without rebuilding the image
+      - ./data:/app/data
+    environment:
+      - FLASK_DEBUG=0
+    restart: unless-stopped

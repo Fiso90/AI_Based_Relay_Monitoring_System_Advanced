@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Train — Alternator ML Dashboard{% endblock %}
+{% block content %}
+<h1>Train the pipeline (Stage 3 + 4)</h1>
+<p class="page-sub">Fits the Isolation Forest, derives the anomaly score, then trains 5 classifiers. Compare random vs. chronological splits — a big F1 drop under chronological split means the random-split number was optimistic.</p>
+
+<div class="card">
+  <div class="field-row" style="align-items:flex-end">
+    <div class="field">
+      <label for="split-strategy">Split strategy</label>
+      <select id="split-strategy">
+        <option value="random" selected>Random (stratified)</option>
+        <option value="chronological">Chronological (train on earliest days)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="test-size">Test size</label>
+      <select id="test-size">
+        <option value="0.2">20%</option>
+        <option value="0.25" selected>25%</option>
+        <option value="0.3">30%</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="contamination">Isolation Forest contamination</label>
+      <select id="contamination">
+        <option value="0.05">0.05</option>
+        <option value="0.1" selected>0.10</option>
+        <option value="0.15">0.15</option>
+        <option value="0.2">0.20</option>
+      </select>
+    </div>
+    <button id="train-btn">Train all 5 models</button>
+  </div>
+  <div id="train-status" class="muted" style="margin-top:10px"></div>
+</div>
+
+<div id="results-section" style="display:none; margin-top:20px">
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>Weighted F1 by model</h2>
+      <canvas id="f1Chart" height="220"></canvas>
+    </div>
+    <div class="card">
+      <h2>Feature importance (Random Forest, Gini)</h2>
+      <canvas id="importanceChart" height="220"></canvas>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h2>Confusion matrix</h2>
+    <div class="field" style="max-width:260px">
+      <label for="cm-model">Model</label>
+      <select id="cm-model"></select>
+    </div>
+    <div id="cm-container"></div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h2>Run summary</h2>
+    <div id="run-summary"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let lastArtifact = null;
+let charts = {};
+
+document.getElementById("train-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("train-btn");
+  btn.disabled = true;
+  document.getElementById("train-status").innerHTML = '<span class="spinner"></span>Training Isolation Forest + 5 classifiers… this runs live in the container.';
+
+  const payload = {
+    split_strategy: document.getElementById("split-strategy").value,
+    test_size: parseFloat(document.getElementById("test-size").value),
+    contamination: parseFloat(document.getElementById("contamination").value),
+  };
+  const artifact = await postJSON("/api/train", payload);
+  lastArtifact = artifact;
+  btn.disabled = false;
+  document.getElementById("train-status").innerHTML = `Done. Trained on ${artifact.n_train} rows, tested on ${artifact.n_test} rows (${artifact.split_strategy} split).`;
+  renderResults(artifact);
+});
+
+function renderResults(artifact) {
+  document.getElementById("results-section").style.display = "block";
+
+  const names = Object.keys(artifact.results);
+  const f1s = names.map(n => artifact.results[n].f1_weighted * 100);
+
+  if (charts.f1) charts.f1.destroy();
+  charts.f1 = new Chart(document.getElementById("f1Chart"), {
+    type: "bar",
+    data: { labels: names, datasets: [{ label: "Weighted F1 %", data: f1s, backgroundColor: names.map(n => n === artifact.best_model ? "#4ecb71" : "#3fa9f5") }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false } },
+      scales: { x: { min: 0, max: 100, grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } }, y: { grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } } } },
+  });
+
+  const impEntries = Object.entries(artifact.feature_importance).sort((a,b) => b[1]-a[1]);
+  if (charts.imp) charts.imp.destroy();
+  charts.imp = new Chart(document.getElementById("importanceChart"), {
+    type: "bar",
+    data: { labels: impEntries.map(e => e[0]), datasets: [{ label: "Gini importance", data: impEntries.map(e => e[1]), backgroundColor: "#a385f0" }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false } },
+      scales: { x: { grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } }, y: { grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } } } },
+  });
+
+  const sel = document.getElementById("cm-model");
+  sel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join("");
+  sel.value = artifact.best_model;
+  renderConfusion(artifact, artifact.best_model);
+  sel.onchange = () => renderConfusion(artifact, sel.value);
+
+  document.getElementById("run-summary").innerHTML = `
+    <table>
+      <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Split strategy</td><td>${artifact.split_strategy}</td></tr>
+        <tr><td>Test size</td><td>${artifact.test_size}</td></tr>
+        <tr><td>Isolation Forest contamination</td><td>${artifact.contamination}</td></tr>
+        <tr><td>Train rows / Test rows</td><td>${artifact.n_train} / ${artifact.n_test}</td></tr>
+        <tr><td>Best model</td><td><strong>${artifact.best_model}</strong> (F1 = ${(artifact.results[artifact.best_model].f1_weighted*100).toFixed(1)}%)</td></tr>
+      </tbody>
+    </table>`;
+}
+
+function renderConfusion(artifact, modelName) {
+  const cm = artifact.results[modelName].confusion_matrix;
+  const labels = artifact.results[modelName].labels;
+  let html = "<table><thead><tr><th>Actual \\ Predicted</th>" + labels.map(l => `<th>${l}</th>`).join("") + "</tr></thead><tbody>";
+  cm.forEach((row, i) => {
+    html += `<tr><th>${labels[i]}</th>` + row.map((v, j) => {
+      const isDiag = i === j;
+      return `<td style="background:${isDiag ? 'rgba(78,203,113,0.18)' : 'rgba(242,85,90,0.10)'}">${v}</td>`;
+    }).join("") + "</tr>";
+  });
+  html += "</tbody></table>";
+  document.getElementById("cm-container").innerHTML = html;
+}
+
+// If models were already trained earlier in this server session, show them.
+(async () => {
+  const last = await getJSON("/api/train/last");
+  if (last.trained) { lastArtifact = last; renderResults(last); document.getElementById("train-status").textContent = "Showing results from the last training run this session."; }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Predict — Alternator ML Dashboard{% endblock %}
+{% block content %}
+<h1>Live prediction</h1>
+<p class="page-sub">Runs the full inference path: raw inputs → physics engine → anomaly score → chosen classifier. Train models on the Train page first.</p>
+
+<div id="not-trained-warning" class="callout danger" style="display:none">
+  No trained models found yet. Go to <a href="{{ url_for('train_page') }}" style="color:var(--red)">Train models</a> and train at least once — the trained models persist to disk and will be available here.
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>Input telemetry</h2>
+    <div class="field"><label>MW output</label><input type="number" id="in-mw" value="1.9" step="0.01"></div>
+    <div class="field"><label>Stator current (A)</label><input type="number" id="in-current" value="112" step="0.1"></div>
+    <div class="field"><label>Power factor</label><input type="number" id="in-pf" value="0.88" step="0.01" min="0" max="1"></div>
+    <div class="field"><label>Voltage (kV)</label><input type="number" id="in-voltage" value="10.9" step="0.01"></div>
+    <div class="field">
+      <label>Model</label>
+      <select id="in-model"></select>
+    </div>
+    <button id="predict-btn">Run prediction</button>
+  </div>
+
+  <div class="card">
+    <h2>Result</h2>
+    <div id="predict-result" class="muted">Awaiting input…</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h2>Try presets</h2>
+  <div style="display:flex; gap:10px; flex-wrap:wrap">
+    <button class="secondary" data-preset="normal">Typical normal reading</button>
+    <button class="secondary" data-preset="warning">Elevated / warning reading</button>
+    <button class="secondary" data-preset="high">Overload / high-risk reading</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const presets = {
+  normal:  { mw: 1.85, current: 106, pf: 0.90, voltage: 11.05 },
+  warning: { mw: 2.15, current: 114, pf: 0.83, voltage: 10.55 },
+  high:    { mw: 2.55, current: 128, pf: 0.77, voltage: 10.20 },
+};
+
+document.querySelectorAll("[data-preset]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const p = presets[btn.dataset.preset];
+    document.getElementById("in-mw").value = p.mw;
+    document.getElementById("in-current").value = p.current;
+    document.getElementById("in-pf").value = p.pf;
+    document.getElementById("in-voltage").value = p.voltage;
+    document.getElementById("predict-btn").click();
+  });
+});
+
+async function checkModelsAvailable() {
+  const data = await getJSON("/api/predict/models_available");
+  if (!data.available) {
+    document.getElementById("not-trained-warning").style.display = "block";
+    document.getElementById("predict-btn").disabled = true;
+    return;
+  }
+  const sel = document.getElementById("in-model");
+  const labelMap = { random_forest: "Random Forest", xgboost: "XGBoost", svm: "SVM (RBF)", mlp: "Neural Net (MLP)", logreg: "Logistic Regression" };
+  sel.innerHTML = data.models.map(m => `<option value="${m}">${labelMap[m] || m}</option>`).join("");
+}
+
+document.getElementById("predict-btn").addEventListener("click", async () => {
+  const payload = {
+    mw: parseFloat(document.getElementById("in-mw").value),
+    current_a: parseFloat(document.getElementById("in-current").value),
+    power_factor: parseFloat(document.getElementById("in-pf").value),
+    voltage_kv: parseFloat(document.getElementById("in-voltage").value),
+    model_key: document.getElementById("in-model").value,
+  };
+  document.getElementById("predict-result").innerHTML = '<span class="spinner"></span>Running inference…';
+  const data = await postJSON("/api/predict", payload);
+
+  if (data.error) {
+    document.getElementById("predict-result").innerHTML = `<div class="callout danger">${data.error}</div>`;
+    return;
+  }
+
+  const badgeCls = data.prediction === "NORMAL" ? "badge-normal" : (data.prediction === "WARNING" ? "badge-warning" : "badge-high");
+  let probaHtml = "";
+  if (data.probabilities) {
+    probaHtml = "<table><thead><tr><th>Class</th><th>Probability</th></tr></thead><tbody>" +
+      Object.entries(data.probabilities).sort((a,b)=>b[1]-a[1]).map(([c,p]) => `<tr><td>${c}</td><td>${(p*100).toFixed(1)}%</td></tr>`).join("") +
+      "</tbody></table>";
+  }
+
+  document.getElementById("predict-result").innerHTML = `
+    <div style="margin-bottom:14px">
+      <span class="badge ${badgeCls}" style="font-size:14px; padding:6px 14px">${data.prediction}</span>
+    </div>
+    ${probaHtml}
+    <div class="grid grid-4" style="margin-top:14px">
+      <div class="card stat-card"><div class="stat-label">Calculated MVA</div><div class="stat-value" style="font-size:18px">${data.engineered_features.Calculated_MVA}</div></div>
+      <div class="card stat-card"><div class="stat-label">Load %</div><div class="stat-value" style="font-size:18px">${data.engineered_features.Load_Percent}%</div></div>
+      <div class="card stat-card"><div class="stat-label">Voltage dev %</div><div class="stat-value" style="font-size:18px">${data.engineered_features.Voltage_Deviation_Percent}%</div></div>
+      <div class="card stat-card"><div class="stat-label">Anomaly score</div><div class="stat-value" style="font-size:18px">${data.anomaly_score}</div></div>
+    </div>
+    <p class="muted" style="margin-top:12px">Model used: ${data.model_used}</p>`;
+});
+
+checkModelsAvailable();
+</script>
+{% endblock %}

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Overview — Alternator ML Dashboard{% endblock %}
+{% block content %}
+<h1>3 MW Alternator — ML lifecycle dashboard</h1>
+<p class="page-sub">End-to-end pipeline: ingestion → EDA → physics-informed features → confirmatory statistics → isolation forest → supervised classification → live inference.</p>
+
+<div class="grid grid-4">
+  <div class="card stat-card">
+    <div class="stat-label">Observations</div>
+    <div class="stat-value">{{ health.n_observations }}</div>
+    <div class="stat-flag flag-ok">Full dataset loaded</div>
+  </div>
+  <div class="card stat-card">
+    <div class="stat-label">Date range</div>
+    <div class="stat-value" style="font-size:16px">{{ health.date_min }} → {{ health.date_max }}</div>
+    <div class="stat-flag muted">{{ health.n_days }} calendar days</div>
+  </div>
+  <div class="card stat-card">
+    <div class="stat-label">Missing values</div>
+    <div class="stat-value">{{ health.missing_values }}</div>
+    <div class="stat-flag {{ 'flag-ok' if health.missing_values == 0 else 'flag-warn' }}">
+      {{ 'Clean' if health.missing_values == 0 else 'Needs imputation' }}
+    </div>
+  </div>
+  <div class="card stat-card">
+    <div class="stat-label">Duplicate rows</div>
+    <div class="stat-value">{{ health.duplicate_rows }}</div>
+    <div class="stat-flag {{ 'flag-ok' if health.duplicate_rows == 0 else 'flag-warn' }}">
+      {{ 'None found' if health.duplicate_rows == 0 else 'Review needed' }}
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-2" style="margin-top:20px">
+  <div class="card">
+    <h2>Trip-risk class balance</h2>
+    <table>
+      <thead><tr><th>Class</th><th>Count</th><th>Share</th></tr></thead>
+      <tbody>
+        {% for cls, count in health.class_counts.items() %}
+        <tr>
+          <td><span class="badge {{ 'badge-normal' if cls=='NORMAL' else ('badge-warning' if cls=='WARNING' else 'badge-high') }}">{{ cls }}</span></td>
+          <td>{{ count }}</td>
+          <td>{{ "%.1f"|format(100 * count / health.n_observations) }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Where to go next</h2>
+    <p class="muted" style="margin-top:0">This dashboard mirrors the 4-stage ML lifecycle used for this project:</p>
+    <div style="display:flex; flex-direction:column; gap:10px; margin-top:14px">
+      <a href="{{ url_for('eda_page') }}" style="color:var(--accent); text-decoration:none">1. EDA — explore distributions, correlations, class separation →</a>
+      <a href="{{ url_for('pipeline_page') }}" style="color:var(--accent); text-decoration:none">2. Physics engine — inspect the engineered feature formulas →</a>
+      <a href="{{ url_for('cda_page') }}" style="color:var(--accent); text-decoration:none">3. CDA — run hypothesis tests, VIF, and the rule-based baseline check →</a>
+      <a href="{{ url_for('train_page') }}" style="color:var(--accent); text-decoration:none">4. Train — fit Isolation Forest + 5 classifiers, compare split strategies →</a>
+      <a href="{{ url_for('predict_page') }}" style="color:var(--accent); text-decoration:none">5. Predict — live inference on a hypothetical reading →</a>
+    </div>
+  </div>
+</div>
+
+<div class="callout warn" style="margin-top:20px">
+  <strong>Data provenance note:</strong> this dashboard reads the full 1,000-observation workbook directly and recomputes all physics features itself (Stage 2), rather than trusting any pre-baked summary numbers — so figures here will always match the underlying data currently in <code>data/alternator_data.xlsx</code>.
+</div>
+{% endblock %}

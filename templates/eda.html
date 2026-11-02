@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}EDA — Alternator ML Dashboard{% endblock %}
+{% block content %}
+<h1>Exploratory data analysis</h1>
+<p class="page-sub">Descriptive, non-inferential view of the telemetry. Pick a feature to update every chart on this page.</p>
+
+<div class="field-row" style="align-items:flex-end; margin-bottom:20px">
+  <div class="field">
+    <label for="feature-select">Feature</label>
+    <select id="feature-select">
+      {% for f in numeric_features %}
+      <option value="{{ f }}" {{ 'selected' if f=='MW' }}>{{ f }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="feature-select-y">Compare against (scatter Y-axis)</label>
+    <select id="feature-select-y">
+      {% for f in numeric_features %}
+      <option value="{{ f }}" {{ 'selected' if f=='Current_A' }}>{{ f }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button id="refresh-btn">Refresh charts</button>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>Distribution (histogram)</h2>
+    <canvas id="histChart" height="220"></canvas>
+  </div>
+  <div class="card">
+    <h2>Distribution by risk class (box-style range)</h2>
+    <canvas id="boxChart" height="220"></canvas>
+  </div>
+  <div class="card">
+    <h2>Scatter — colored by Trip_Risk</h2>
+    <canvas id="scatterChart" height="240"></canvas>
+  </div>
+  <div class="card">
+    <h2>Time series</h2>
+    <canvas id="timeChart" height="240"></canvas>
+  </div>
+</div>
+
+<div class="grid grid-2" style="margin-top:18px">
+  <div class="card">
+    <h2>Class balance</h2>
+    <canvas id="classChart" height="200"></canvas>
+  </div>
+  <div class="card">
+    <h2>Correlation matrix</h2>
+    <div id="corrTable" style="overflow-x:auto"></div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h2>Summary statistics</h2>
+  <div id="summaryTable" style="overflow-x:auto"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let charts = {};
+
+function destroyChart(key) {
+  if (charts[key]) { charts[key].destroy(); charts[key] = null; }
+}
+
+async function loadHistogram(feature) {
+  const data = await getJSON(`/api/eda/histogram?feature=${feature}&bins=25`);
+  destroyChart("hist");
+  const ctx = document.getElementById("histChart");
+  charts.hist = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: data.bin_centers.map(v => v.toFixed(2)),
+      datasets: [{ label: feature, data: data.counts, backgroundColor: "#3fa9f5" }],
+    },
+    options: baseOptions(),
+  });
+}
+
+async function loadBoxplot(feature) {
+  const data = await getJSON(`/api/eda/boxplot?feature=${feature}`);
+  destroyChart("box");
+  const stats = Object.entries(data).map(([cls, vals]) => {
+    vals = vals.slice().sort((a,b) => a-b);
+    const q = (p) => vals[Math.floor(p * (vals.length - 1))];
+    return { cls, min: vals[0], q1: q(0.25), median: q(0.5), q3: q(0.75), max: vals[vals.length-1] };
+  });
+  const ctx = document.getElementById("boxChart");
+  charts.box = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: stats.map(s => s.cls),
+      datasets: [
+        { label: "Min→Q1", data: stats.map(s => [s.min, s.q1]), backgroundColor: "rgba(255,255,255,0.08)" },
+        { label: "Q1→Median", data: stats.map(s => [s.q1, s.median]), backgroundColor: stats.map(s => RISK_COLORS[s.cls] + "88") },
+        { label: "Median→Q3", data: stats.map(s => [s.median, s.q3]), backgroundColor: stats.map(s => RISK_COLORS[s.cls]) },
+        { label: "Q3→Max", data: stats.map(s => [s.q3, s.max]), backgroundColor: "rgba(255,255,255,0.08)" },
+      ],
+    },
+    options: { ...baseOptions(), indexAxis: "y", scales: { x: { stacked: false, grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } }, y: { ticks: { color: "#9aa5b1" } } } },
+  });
+}
+
+async function loadScatter(x, y) {
+  const data = await getJSON(`/api/eda/scatter?x=${x}&y=${y}`);
+  destroyChart("scatter");
+  const byClass = { NORMAL: [], WARNING: [], HIGH: [] };
+  data.x.forEach((xv, i) => byClass[data.class[i]].push({ x: xv, y: data.y[i] }));
+  const ctx = document.getElementById("scatterChart");
+  charts.scatter = new Chart(ctx, {
+    type: "scatter",
+    data: {
+      datasets: Object.entries(byClass).map(([cls, pts]) => ({
+        label: cls, data: pts, backgroundColor: RISK_COLORS[cls], pointRadius: 3,
+      })),
+    },
+    options: { ...baseOptions(), scales: { x: { title: { display: true, text: x, color: "#9aa5b1" }, grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } }, y: { title: { display: true, text: y, color: "#9aa5b1" }, grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } } } },
+  });
+}
+
+async function loadTimeseries(feature) {
+  const data = await getJSON(`/api/eda/timeseries?feature=${feature}`);
+  destroyChart("time");
+  const ctx = document.getElementById("timeChart");
+  const step = Math.max(1, Math.floor(data.values.length / 300)); // decimate for readability
+  const labels = data.timestamps.filter((_, i) => i % step === 0);
+  const values = data.values.filter((_, i) => i % step === 0);
+  charts.time = new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets: [{ label: feature, data: values, borderColor: "#3fa9f5", pointRadius: 0, borderWidth: 1.5 }] },
+    options: { ...baseOptions(), scales: { x: { ticks: { color: "#9aa5b1", maxTicksLimit: 8 }, grid: { display: false } }, y: { ticks: { color: "#9aa5b1" }, grid: { color: "#2a323c" } } } },
+  });
+}
+
+async function loadClassBalance() {
+  const data = await getJSON("/api/eda/class_balance");
+  destroyChart("classb");
+  const ctx = document.getElementById("classChart");
+  charts.classb = new Chart(ctx, {
+    type: "doughnut",
+    data: { labels: data.labels, datasets: [{ data: data.counts, backgroundColor: data.labels.map(l => RISK_COLORS[l]) }] },
+    options: { plugins: { legend: { labels: { color: "#e6edf3" } } } },
+  });
+}
+
+async function loadCorrelation() {
+  const data = await getJSON("/api/eda/correlation");
+  const n = data.features.length;
+  let html = "<table><thead><tr><th></th>" + data.features.map(f => `<th>${f}</th>`).join("") + "</tr></thead><tbody>";
+  data.matrix.forEach((row, i) => {
+    html += `<tr><th>${data.features[i]}</th>` + row.map(v => {
+      const alpha = Math.abs(v);
+      const color = v >= 0 ? `rgba(63,169,245,${alpha})` : `rgba(242,85,90,${alpha})`;
+      return `<td style="background:${color}; color:#fff">${v.toFixed(2)}</td>`;
+    }).join("") + "</tr>";
+  });
+  html += "</tbody></table>";
+  document.getElementById("corrTable").innerHTML = html;
+}
+
+async function loadSummary() {
+  const data = await getJSON("/api/eda/summary");
+  let html = "<table><thead><tr><th>Feature</th><th>Mean</th><th>Std</th><th>Min</th><th>Max</th><th>Skew</th><th>Kurtosis</th></tr></thead><tbody>";
+  data.forEach(r => {
+    html += `<tr><td>${r.feature}</td><td>${r.mean.toFixed(3)}</td><td>${r.std.toFixed(3)}</td><td>${r.min.toFixed(3)}</td><td>${r.max.toFixed(3)}</td><td>${r.skew.toFixed(3)}</td><td>${r.kurtosis.toFixed(3)}</td></tr>`;
+  });
+  html += "</tbody></table>";
+  document.getElementById("summaryTable").innerHTML = html;
+}
+
+function baseOptions() {
+  return {
+    plugins: { legend: { labels: { color: "#e6edf3" } } },
+    scales: {
+      x: { grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } },
+      y: { grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } },
+    },
+  };
+}
+
+async function refreshAll() {
+  const feature = document.getElementById("feature-select").value;
+  const featureY = document.getElementById("feature-select-y").value;
+  await Promise.all([
+    loadHistogram(feature),
+    loadBoxplot(feature),
+    loadScatter(feature, featureY),
+    loadTimeseries(feature),
+  ]);
+}
+
+document.getElementById("refresh-btn").addEventListener("click", refreshAll);
+document.getElementById("feature-select").addEventListener("change", refreshAll);
+document.getElementById("feature-select-y").addEventListener("change", refreshAll);
+
+refreshAll();
+loadClassBalance();
+loadCorrelation();
+loadSummary();
+</script>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Pipeline — Alternator ML Dashboard{% endblock %}
+{% block content %}
+<h1>ML lifecycle pipeline</h1>
+<p class="page-sub">4-stage pipeline. Stage 2's formulas are computed live below on a value you can edit.</p>
+
+<div class="pipeline-row">
+  <div class="pipeline-step"><div class="step-num">1</div><h3>Preprocessing</h3><p class="muted" style="font-size:12.5px">Clean sensor noise, handle outliers, validate schema.</p></div>
+  <div class="pipeline-arrow">→</div>
+  <div class="pipeline-step"><div class="step-num">2</div><h3>Physics engine</h3><p class="muted" style="font-size:12.5px">Derive MVA, reactive power, load %, voltage deviation.</p></div>
+  <div class="pipeline-arrow">→</div>
+  <div class="pipeline-step"><div class="step-num">3</div><h3>Isolation Forest</h3><p class="muted" style="font-size:12.5px">Unsupervised anomaly scoring, no labels used.</p></div>
+  <div class="pipeline-arrow">→</div>
+  <div class="pipeline-step"><div class="step-num">4</div><h3>Supervised ML</h3><p class="muted" style="font-size:12.5px">5 classifiers predict Trip_Risk.</p></div>
+</div>
+
+<div class="card">
+  <h2>Try the physics engine (Stage 2) interactively</h2>
+  <p class="muted">Rated capacity: {{ rated_mw }} MW · Nominal voltage: {{ rated_kv }} kV</p>
+  <div class="field-row">
+    <div class="field"><label>MW</label><input type="number" id="p-mw" value="1.9" step="0.01"></div>
+    <div class="field"><label>Current (A)</label><input type="number" id="p-current" value="110" step="0.1"></div>
+    <div class="field"><label>Power factor</label><input type="number" id="p-pf" value="0.9" step="0.01" min="0" max="1"></div>
+    <div class="field"><label>Voltage (kV)</label><input type="number" id="p-voltage" value="11.0" step="0.01"></div>
+  </div>
+  <button id="p-compute">Compute engineered features</button>
+  <div id="p-result" style="margin-top:16px"></div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h2>Setpoint thresholds (drive the Trip_Risk label)</h2>
+  <table>
+    <thead><tr><th>Channel</th><th>Normal</th><th>Warning</th><th>High</th></tr></thead>
+    <tbody>
+      <tr><td>MW</td><td>≤ {{ setpoints.MW.normal_max }}</td><td>{{ setpoints.MW.normal_max }} – {{ setpoints.MW.warning_max }}</td><td>&gt; {{ setpoints.MW.warning_max }}</td></tr>
+      <tr><td>Current (A)</td><td>≤ {{ setpoints.Current_A.normal_max }}</td><td>{{ setpoints.Current_A.normal_max }} – {{ setpoints.Current_A.warning_max }}</td><td>&gt; {{ setpoints.Current_A.warning_max }}</td></tr>
+      <tr><td>Power factor</td><td>≥ {{ setpoints.Power_Factor.normal_min }}</td><td>{{ setpoints.Power_Factor.warning_min }} – {{ setpoints.Power_Factor.normal_min }}</td><td>&lt; {{ setpoints.Power_Factor.warning_min }}</td></tr>
+      <tr><td>Voltage deviation (%)</td><td>≤ {{ setpoints.Voltage_Deviation_Percent.normal_max }}</td><td>{{ setpoints.Voltage_Deviation_Percent.normal_max }} – {{ setpoints.Voltage_Deviation_Percent.warning_max }}</td><td>&gt; {{ setpoints.Voltage_Deviation_Percent.warning_max }}</td></tr>
+    </tbody>
+  </table>
+  <div class="callout" style="margin-top:14px">These are provisional analytical guidelines — see the CDA page's rule-based baseline check for how much of the label these thresholds alone reconstruct.</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById("p-compute").addEventListener("click", () => {
+  const mw = parseFloat(document.getElementById("p-mw").value);
+  const current = parseFloat(document.getElementById("p-current").value);
+  const pf = parseFloat(document.getElementById("p-pf").value);
+  const voltage = parseFloat(document.getElementById("p-voltage").value);
+
+  const mva = (Math.sqrt(3) * voltage * current) / 1000;
+  const q = mva * Math.sin(Math.acos(Math.min(Math.max(pf, -1), 1)));
+  const loadPct = (mw / {{ rated_mw }}) * 100;
+  const vDev = ((voltage - {{ rated_kv }}) / {{ rated_kv }}) * 100;
+
+  document.getElementById("p-result").innerHTML = `
+    <div class="grid grid-4">
+      <div class="card stat-card"><div class="stat-label">Calculated MVA</div><div class="stat-value">${mva.toFixed(3)}</div></div>
+      <div class="card stat-card"><div class="stat-label">Reactive power (MVAr)</div><div class="stat-value">${q.toFixed(3)}</div></div>
+      <div class="card stat-card"><div class="stat-label">Load %</div><div class="stat-value">${loadPct.toFixed(2)}%</div></div>
+      <div class="card stat-card"><div class="stat-label">Voltage deviation %</div><div class="stat-value">${vDev.toFixed(2)}%</div></div>
+    </div>`;
+});
+document.getElementById("p-compute").click();
+</script>
+{% endblock %}
