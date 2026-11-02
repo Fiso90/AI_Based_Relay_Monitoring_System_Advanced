@@ -1,0 +1,28 @@
+# Fly.io config. Before first deploy:  fly volumes create relay_data --size 1
+# then:  fly secrets set SECRET_KEY=$(openssl rand -hex 32)   and   fly deploy
+app = "CHANGE-ME-unique-app-name"
+primary_region = "jnb"   # Johannesburg; change if you prefer
+
+[build]
+
+[env]
+  PERSIST_DIR = "/data"
+  COOKIE_SECURE = "1"
+  FLASK_DEBUG = "0"
+  PORT = "5000"
+
+[mounts]
+  source = "relay_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

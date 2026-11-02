@@ -1,0 +1,18 @@
+{% extends "_auth_base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block body %}
+<h1 style="font-size:20px">Sign in</h1>
+{% if first_run %}
+<div class="callout">No accounts exist yet. <a href="{{ url_for('register') }}">Create the first account</a> &mdash; it becomes the administrator.</div>
+{% endif %}
+{% if error %}<div class="callout danger" role="alert">{{ error }}</div>{% endif %}
+<form method="post" action="{{ url_for('login', next=next) if next else url_for('login') }}" autocomplete="on">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field"><label for="identifier">Username or email</label>
+    <input class="text-input" id="identifier" name="identifier" required autofocus autocomplete="username"></div>
+  <div class="field"><label for="password">Password</label>
+    <input class="text-input" id="password" name="password" type="password" required autocomplete="current-password"></div>
+  <button type="submit" style="width:100%">Sign in</button>
+</form>
+<p class="muted" style="margin-top:16px">No account? <a href="{{ url_for('register') }}">Register</a></p>
+{% endblock %}

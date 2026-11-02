@@ -15,6 +15,7 @@ Current_A does not, by itself, prove Current is the unique causal driver.
 import numpy as np
 import pandas as pd
 from . import config
+from . import state
 
 
 def compute_physics_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -35,11 +36,12 @@ def compute_physics_features(df: pd.DataFrame) -> pd.DataFrame:
     out["Reactive_Power_MVAr_engine"] = out["Calculated_MVA_engine"] * np.sin(np.arccos(pf_clipped))
 
     # Load percent relative to rated capacity
-    out["Load_Percent_engine"] = (out["MW"] / config.RATED_MW) * 100.0
+    out["Load_Percent_engine"] = (out["MW"] / state.get_rated_mw()) * 100.0
 
     # Voltage deviation from nominal
+    rated_kv = state.get_rated_kv()
     out["Voltage_Deviation_Percent_engine"] = (
-        (out["Voltage_kV"] - config.RATED_KV) / config.RATED_KV
+        (out["Voltage_kV"] - rated_kv) / rated_kv
     ) * 100.0
 
     return out
@@ -68,8 +70,9 @@ def engineer_for_row(mw: float, current_a: float, power_factor: float, voltage_k
     mva = (np.sqrt(3) * voltage_kv * current_a) / 1000.0
     pf_clipped = max(min(power_factor, 1.0), -1.0)
     q = mva * np.sin(np.arccos(pf_clipped))
-    load_pct = (mw / config.RATED_MW) * 100.0
-    v_dev = ((voltage_kv - config.RATED_KV) / config.RATED_KV) * 100.0
+    load_pct = (mw / state.get_rated_mw()) * 100.0
+    rated_kv = state.get_rated_kv()
+    v_dev = ((voltage_kv - rated_kv) / rated_kv) * 100.0
     return {
         "Calculated_MVA": round(float(mva), 3),
         "Reactive_Power_MVAr": round(float(q), 3),

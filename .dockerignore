@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.vscode/
+venv/
+.venv/
+models/*.joblib
+data/active_dataset.xlsx
+data/events.db
+*.md
+data/users.db
+data/.secret_key
+models/last_train.json

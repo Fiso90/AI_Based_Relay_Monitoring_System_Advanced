@@ -1,7 +1,7 @@
 services:
   dashboard:
     build: .
-    container_name: alternator_ml_dashboard
+    container_name: ai_relay_monitor_system
     ports:
       - "5000:5000"
     volumes:
@@ -11,4 +11,8 @@ services:
       - ./data:/app/data
     environment:
       - FLASK_DEBUG=0
+      # Optional: fixed session-signing key (otherwise generated once into data/.secret_key)
+      # - SECRET_KEY=change-me
+      # Set to 1 when served over HTTPS so the session cookie is Secure-only
+      # - COOKIE_SECURE=1
     restart: unless-stopped

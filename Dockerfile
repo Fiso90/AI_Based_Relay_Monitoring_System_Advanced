@@ -20,4 +20,5 @@ ENV PORT=5000
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "180", "app:app"]
+# Honour the PORT env var that cloud hosts inject (falls back to 5000 locally)
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} --workers ${WEB_CONCURRENCY:-2} --timeout 180 app:app"]

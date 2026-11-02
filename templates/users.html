@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Users — AI Relay Monitor{% endblock %}
+{% block content %}
+<h1>User management</h1>
+<p class="page-sub">Viewer: read-only &middot; Operator: run decisions &amp; acknowledge alarms &middot; Admin: upload data, train models, clear log, manage users.</p>
+<div id="user-msg"></div>
+<div class="card">
+<table>
+  <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Last sign-in</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for u in users %}
+  <tr>
+    <td><strong>{{ u.username }}</strong><br><span class="muted">{{ u.full_name }}</span></td>
+    <td>{{ u.email }}</td>
+    <td>
+      <select data-uid="{{ u.id }}" class="role-select" {{ 'disabled' if u.id == current_user.id }}>
+        {% for r in roles %}<option value="{{ r }}" {{ 'selected' if r == u.role }}>{{ r }}</option>{% endfor %}
+      </select>
+    </td>
+    <td>{{ u.last_login | int | default(0) }}<span class="ts" data-ts="{{ u.last_login or '' }}"></span></td>
+    <td>
+      {% if u.active %}<span class="badge badge-normal">active</span>{% else %}<span class="badge badge-high">disabled</span>{% endif %}
+      {% if u.id != current_user.id %}
+      <button class="secondary toggle-active" data-uid="{{ u.id }}" data-active="{{ 0 if u.active else 1 }}" style="padding:4px 10px;margin-left:8px">{{ 'Disable' if u.active else 'Enable' }}</button>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  function show(msg, bad) {
+    var el = document.getElementById("user-msg");
+    el.innerHTML = '<div class="callout ' + (bad ? "danger" : "") + '"></div>';
+    el.firstChild.textContent = msg;
+  }
+  function post(url, body) {
+    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
+  }
+  document.querySelectorAll(".ts").forEach(function (el) {
+    var t = parseFloat(el.dataset.ts);
+    el.previousSibling.textContent = "";
+    el.textContent = t ? new Date(t * 1000).toLocaleString() : "never";
+  });
+  document.querySelectorAll(".role-select").forEach(function (s) {
+    s.addEventListener("change", function () {
+      post("/api/users/" + s.dataset.uid + "/role", { role: s.value }).then(function (r) {
+        if (r.ok) show("Role updated.", false); else { show(r.d.error, true); }
+      });
+    });
+  });
+  document.querySelectorAll(".toggle-active").forEach(function (b) {
+    b.addEventListener("click", function () {
+      post("/api/users/" + b.dataset.uid + "/active", { active: b.dataset.active === "1" }).then(function (r) {
+        if (r.ok) location.reload(); else show(r.d.error, true);
+      });
+    });
+  });
+})();
+</script>
+{% endblock %}

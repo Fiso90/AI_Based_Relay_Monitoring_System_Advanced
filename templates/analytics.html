@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}Predictive Analytics — AI Relay Monitor{% endblock %}
+{% block content %}
+<h1>Predictive analytics</h1>
+<p class="page-sub">Run one input through all 5 trained models at once, then dig into how they compare on the held-out test set.</p>
+
+<div id="not-trained-warning" class="callout danger" style="display:none">
+  No trained models found yet. Go to <a href="{{ url_for('train_page') }}" style="color:var(--red)">Train models</a> and train at least once first.
+</div>
+
+<div class="tabs" data-tabs>
+  <button class="tab-btn active" data-tab="live">Live multi-model prediction</button>
+  <button class="tab-btn" data-tab="compare">Deep model comparison</button>
+</div>
+
+<!-- ===================== LIVE PREDICTION ===================== -->
+<div class="tab-panel active" data-panel="live">
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>Input telemetry</h2>
+      <div class="field"><label>MW output</label><input type="number" id="in-mw" value="1.9" step="0.01"></div>
+      <div class="field"><label>Stator current (A)</label><input type="number" id="in-current" value="112" step="0.1"></div>
+      <div class="field"><label>Power factor</label><input type="number" id="in-pf" value="0.88" step="0.01" min="0" max="1"></div>
+      <div class="field"><label>Voltage (kV)</label><input type="number" id="in-voltage" value="10.9" step="0.01"></div>
+      <button id="predict-btn">Run all 5 models</button>
+
+      <div style="margin-top:16px">
+        <div class="muted" style="margin-bottom:8px; font-size:11.5px">Presets</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <button class="secondary" data-preset="normal">Typical normal</button>
+          <button class="secondary" data-preset="warning">Elevated / warning</button>
+          <button class="secondary" data-preset="high">Overload / high-risk</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Engineered features + anomaly score</h2>
+      <div id="engineered-result" class="muted">Run a prediction to see derived values.</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h2>Prediction by model</h2>
+    <div id="agreement-banner"></div>
+    <div id="model-predictions" class="grid grid-2" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<!-- ===================== DEEP COMPARISON ===================== -->
+<div class="tab-panel" data-panel="compare">
+  <div id="compare-empty" class="callout warn" style="display:none">
+    Train the models first (Train models page) to populate this comparison from real evaluation results.
+  </div>
+  <div id="compare-content" style="display:none">
+    <div class="grid grid-2">
+      <div class="card">
+        <h2>F1 (weighted) by model</h2>
+        <canvas id="cmpF1Chart" height="220"></canvas>
+      </div>
+      <div class="card">
+        <h2>ROC-AUC (macro, one-vs-rest)</h2>
+        <canvas id="cmpRocChart" height="220"></canvas>
+      </div>
+    </div>
+    <div class="card" style="margin-top:18px">
+      <h2>Per-class F1 — every model, side by side</h2>
+      <canvas id="cmpPerClassChart" height="260"></canvas>
+    </div>
+    <div class="card" style="margin-top:18px">
+      <h2>Full metrics table</h2>
+      <div id="cmpMetricsTable" style="overflow-x:auto"></div>
+    </div>
+    <div class="callout" style="margin-top:14px">
+      Read this alongside the CDA page's rule-based baseline: if a simple threshold rule already reconstructs most of the label, small differences between these models matter less than they might appear.
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var presets = {
+  normal:  { mw: 1.85, current: 106, pf: 0.90, voltage: 11.05 },
+  warning: { mw: 2.15, current: 114, pf: 0.83, voltage: 10.55 },
+  high:    { mw: 2.55, current: 128, pf: 0.77, voltage: 10.20 },
+};
+
+document.querySelectorAll("[data-preset]").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var p = presets[btn.dataset.preset];
+    document.getElementById("in-mw").value = p.mw;
+    document.getElementById("in-current").value = p.current;
+    document.getElementById("in-pf").value = p.pf;
+    document.getElementById("in-voltage").value = p.voltage;
+    document.getElementById("predict-btn").click();
+  });
+});
+
+function checkModelsAvailable() {
+  return getJSON("/api/predict/models_available").then(function (data) {
+    if (!data.available) {
+      document.getElementById("not-trained-warning").style.display = "block";
+      document.getElementById("predict-btn").disabled = true;
+    }
+    return data.available;
+  });
+}
+
+document.getElementById("predict-btn").addEventListener("click", function () {
+  var payload = {
+    mw: parseFloat(document.getElementById("in-mw").value),
+    current_a: parseFloat(document.getElementById("in-current").value),
+    power_factor: parseFloat(document.getElementById("in-pf").value),
+    voltage_kv: parseFloat(document.getElementById("in-voltage").value),
+  };
+  document.getElementById("model-predictions").innerHTML = '<span class="spinner"></span>Running inference across all 5 models…';
+  document.getElementById("agreement-banner").innerHTML = "";
+
+  postJSON("/api/predict/all", payload).then(function (data) {
+    if (data.error) {
+      document.getElementById("model-predictions").innerHTML = '<div class="callout danger">' + data.error + '</div>';
+      return;
+    }
+
+    document.getElementById("agreement-banner").innerHTML = data.unanimous
+      ? '<div class="callout" style="border-color:#4ecb71; background:rgba(78,203,113,0.08)">All 5 models agree on this prediction.</div>'
+      : '<div class="callout warn">Models disagree on this input — worth a closer look rather than trusting any single one blindly.</div>';
+
+    var cardsHtml = "";
+    Object.keys(data.per_model).forEach(function (key) {
+      var m = data.per_model[key];
+      var bc = badgeClass(m.prediction);
+      var isBest = key === data.best_model || (RISK_COLORS && false);
+      var probaRows = "";
+      if (m.probabilities) {
+        var sorted = Object.keys(m.probabilities).sort(function (a, b) { return m.probabilities[b] - m.probabilities[a]; });
+        probaRows = sorted.map(function (c) {
+          return '<div style="display:flex; justify-content:space-between; font-size:11px; margin-top:3px">' +
+            '<span class="muted">' + c + '</span><span>' + (m.probabilities[c] * 100).toFixed(1) + '%</span></div>';
+        }).join("");
+      }
+      cardsHtml += '<div class="card">' +
+        '<div style="display:flex; justify-content:space-between; align-items:center">' +
+        '<h3 style="margin:0">' + m.label + '</h3>' +
+        (key === data.best_model ? '<span class="badge badge-normal" style="font-size:9px">BEST F1</span>' : '') +
+        '</div>' +
+        '<div style="margin:8px 0"><span class="badge ' + bc + '">' + m.prediction + '</span></div>' +
+        probaRows +
+        '</div>';
+    });
+    document.getElementById("model-predictions").innerHTML = cardsHtml;
+
+    var ef = data.engineered_features;
+    document.getElementById("engineered-result").innerHTML =
+      '<div class="grid grid-2">' +
+      '<div class="card stat-card"><div class="stat-label">Calculated MVA</div><div class="stat-value" style="font-size:18px">' + ef.Calculated_MVA + '</div></div>' +
+      '<div class="card stat-card"><div class="stat-label">Load %</div><div class="stat-value" style="font-size:18px">' + ef.Load_Percent + '%</div></div>' +
+      '<div class="card stat-card"><div class="stat-label">Voltage dev %</div><div class="stat-value" style="font-size:18px">' + ef.Voltage_Deviation_Percent + '%</div></div>' +
+      '<div class="card stat-card"><div class="stat-label">Anomaly score</div><div class="stat-value" style="font-size:18px">' + data.anomaly_score + '</div></div>' +
+      '</div>';
+  });
+});
+
+// ---------------- Deep comparison tab ----------------
+var cmpCharts = {};
+
+function loadComparison() {
+  return getJSON("/api/train/last").then(function (artifact) {
+    if (!artifact.trained) {
+      document.getElementById("compare-empty").style.display = "block";
+      document.getElementById("compare-content").style.display = "none";
+      return;
+    }
+    document.getElementById("compare-empty").style.display = "none";
+    document.getElementById("compare-content").style.display = "block";
+    renderComparison(artifact);
+  });
+}
+
+function renderComparison(artifact) {
+  var names = Object.keys(artifact.results);
+
+  try {
+    if (cmpCharts.f1) cmpCharts.f1.destroy();
+    cmpCharts.f1 = new Chart(document.getElementById("cmpF1Chart"), {
+      type: "bar",
+      data: { labels: names, datasets: [{ label: "F1 weighted %", data: names.map(function (n) { return artifact.results[n].f1_weighted * 100; }), backgroundColor: "#3fa9f5" }] },
+      options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: { min: 0, max: 100, grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } }, y: { grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } } } },
+    });
+
+    if (cmpCharts.roc) cmpCharts.roc.destroy();
+    cmpCharts.roc = new Chart(document.getElementById("cmpRocChart"), {
+      type: "bar",
+      data: { labels: names, datasets: [{ label: "ROC-AUC %", data: names.map(function (n) { var v = artifact.results[n].roc_auc_macro; return v !== null ? v * 100 : 0; }), backgroundColor: "#a385f0" }] },
+      options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: { min: 0, max: 100, grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } }, y: { grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } } } },
+    });
+
+    var classLabels = artifact.class_labels;
+    var perClassDatasets = names.map(function (n, i) {
+      var report = artifact.results[n].report;
+      var colors = ["#3fa9f5", "#4ecb71", "#f2a93b", "#a385f0", "#f2555a"];
+      return {
+        label: n,
+        data: classLabels.map(function (c) { return report[c] ? report[c]["f1-score"] * 100 : 0; }),
+        backgroundColor: colors[i % colors.length],
+      };
+    });
+    if (cmpCharts.perclass) cmpCharts.perclass.destroy();
+    cmpCharts.perclass = new Chart(document.getElementById("cmpPerClassChart"), {
+      type: "bar",
+      data: { labels: classLabels, datasets: perClassDatasets },
+      options: { plugins: { legend: { labels: { color: "#e6edf3" } } }, scales: { x: { grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } }, y: { min: 0, max: 100, grid: { color: "#2a323c" }, ticks: { color: "#9aa5b1" } } } },
+    });
+  } catch (e) {
+    console.warn("Chart rendering unavailable:", e);
+  }
+
+  var html = "<table><thead><tr><th>Model</th><th>Accuracy</th><th>Precision (wtd)</th><th>Recall (wtd)</th><th>F1 (wtd)</th><th>ROC-AUC</th></tr></thead><tbody>";
+  names.forEach(function (n) {
+    var r = artifact.results[n];
+    var isBest = n === artifact.best_model;
+    html += "<tr" + (isBest ? ' style="background:rgba(78,203,113,0.08)"' : "") + "><td>" + (isBest ? "★ " : "") + n + "</td>" +
+      "<td>" + (r.accuracy * 100).toFixed(1) + "%</td><td>" + (r.precision_weighted * 100).toFixed(1) + "%</td>" +
+      "<td>" + (r.recall_weighted * 100).toFixed(1) + "%</td><td>" + (r.f1_weighted * 100).toFixed(1) + "%</td>" +
+      "<td>" + (r.roc_auc_macro !== null ? (r.roc_auc_macro * 100).toFixed(1) + "%" : "—") + "</td></tr>";
+  });
+  html += "</tbody></table>";
+  document.getElementById("cmpMetricsTable").innerHTML = html;
+}
+
+checkModelsAvailable();
+loadComparison();
+</script>
+{% endblock %}

@@ -1,0 +1,21 @@
+# Render Blueprint -- "New > Blueprint" in the Render dashboard and point at your repo.
+# NOTE: persistent disks require a paid instance type on Render.
+services:
+  - type: web
+    name: ai-relay-monitor
+    runtime: docker
+    plan: starter
+    healthCheckPath: /login
+    disk:
+      name: relay-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PERSIST_DIR
+        value: /var/data
+      - key: SECRET_KEY
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: FLASK_DEBUG
+        value: "0"

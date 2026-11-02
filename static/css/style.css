@@ -146,6 +146,19 @@ button.secondary { background: var(--bg-panel); color: var(--text-primary); bord
 .badge-warning { background: rgba(242,169,59,0.15); color: var(--amber); }
 .badge-high { background: rgba(242,85,90,0.15); color: var(--red); }
 
+.verdict-banner {
+  border-radius: var(--radius); padding: 22px 26px; border: 1px solid var(--border);
+  transition: background 0.2s, border-color 0.2s;
+}
+.verdict-severity { font-size: 26px; font-weight: 800; letter-spacing: 0.02em; margin-bottom: 6px; }
+.verdict-action { font-size: 13.5px; }
+.verdict-normal { background: rgba(78,203,113,0.08); border-color: rgba(78,203,113,0.35); }
+.verdict-normal .verdict-severity { color: var(--green); }
+.verdict-warning { background: rgba(242,169,59,0.10); border-color: rgba(242,169,59,0.4); }
+.verdict-warning .verdict-severity { color: var(--amber); }
+.verdict-critical { background: rgba(242,85,90,0.12); border-color: rgba(242,85,90,0.45); }
+.verdict-critical .verdict-severity { color: var(--red); }
+
 .pipeline-row { display: flex; align-items: stretch; gap: 8px; margin: 24px 0; flex-wrap: wrap; }
 .pipeline-step {
   flex: 1; min-width: 150px;
@@ -192,3 +205,78 @@ button.secondary { background: var(--bg-panel); color: var(--text-primary); bord
 canvas { max-width: 100%; }
 
 .legend-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+
+/* ---- Auth pages ---- */
+.auth-body { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+.auth-card { width: 100%; max-width: 420px; }
+.text-input {
+  width: 100%; background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-primary);
+  border-radius: 7px; padding: 9px 11px; font-size: 14px; font-family: var(--font);
+}
+.text-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.auth-card a, .content a { color: var(--accent); }
+.nav-item { text-decoration: none; }
+
+/* ---- Sidebar user box ---- */
+.user-box { border-top: 1px solid var(--border); padding: 12px 8px 4px; margin-top: 10px; }
+.user-name { font-weight: 600; font-size: 13px; }
+.user-meta { font-size: 11.5px; color: var(--text-muted); margin: 2px 0 8px; }
+.logout-btn { width: 100%; padding: 6px 10px; font-size: 12.5px; }
+.role-pill { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 7px; border-radius: 10px; font-weight: 700; }
+.role-admin { background: rgba(163,133,240,.18); color: var(--purple); }
+.role-operator { background: rgba(63,169,245,.18); color: var(--accent); }
+.role-viewer { background: rgba(154,165,177,.18); color: var(--text-secondary); }
+
+/* ---- Report ---- */
+.chk { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; color: var(--text-primary); }
+.report { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 32px; }
+.report-head { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid var(--accent); padding-bottom: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+.report-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+.report-title { font-size: 22px; margin: 4px 0 0; }
+.report-meta { width: auto; font-size: 12px; }
+.report-meta td { border: none; padding: 1px 8px; }
+.report-meta td:first-child { color: var(--text-muted); }
+.report-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px; }
+.rs-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.rs-val { font-size: 20px; font-weight: 700; }
+.rs-lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+.txt-red { color: var(--red); }
+.report section { margin-top: 22px; break-inside: auto; }
+.report h2 { font-size: 16px; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+.best-row td { font-weight: 600; }
+.cm-diag { background: rgba(78,203,113,.15); font-weight: 700; }
+.bar { background: var(--bg-panel); height: 8px; border-radius: 4px; }
+.bar span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.report-foot { margin-top: 26px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 8px; }
+
+@media (max-width: 1000px) { .report-summary { grid-template-columns: 1fr 1fr; } }
+
+/* ---- Print: white paper, black ink, no app chrome ---- */
+@media print {
+  @page { size: A4; margin: 14mm 12mm; }
+  html, body { background: #fff !important; color: #000 !important; font-size: 10.5pt; }
+  .sidebar, .no-print, .user-box { display: none !important; }
+  .app-shell { display: block; }
+  .content { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  .report { border: none; padding: 0; background: #fff; color: #000; }
+  .report * { color: #000 !important; border-color: #999 !important; }
+  .report-head { border-bottom: 2px solid #000 !important; }
+  .report h2 { break-after: avoid; }
+  .report table, .report tr, .rs-item { break-inside: avoid; }
+  .report thead { display: table-header-group; }
+  .report td, .report th { padding: 3px 6px; font-size: 9pt; }
+  .badge { background: none !important; border: 1px solid #000; padding: 0 5px; }
+  .cm-diag { background: #e6e6e6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bar { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bar span { background: #333 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  a { text-decoration: none; }
+}
+
+/* ---- Always-visible top bar (user + sign out) and scrollable sidebar ---- */
+.sidebar { overflow-y: auto; }
+.topbar { display: flex; justify-content: flex-end; align-items: center; gap: 14px; margin: -8px 0 18px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text-secondary); }
+.topbar-user strong { color: var(--text-primary); }
+.topbar-btn { padding: 6px 14px; font-size: 12.5px; }
+@media print { .topbar { display: none !important; } }

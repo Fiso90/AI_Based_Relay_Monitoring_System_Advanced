@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Upload data — AI Relay Monitor{% endblock %}
+{% block content %}
+<h1>Upload your own dataset</h1>
+<p class="page-sub">Replace the bundled sample with your own alternator telemetry. Every page recalculates from whatever dataset is active.</p>
+
+<div class="card">
+  <h2>Currently active dataset</h2>
+  <p id="current-source" class="muted" style="margin-top:0">{{ source_label }}</p>
+
+  <h2 style="margin-top:22px">Upload a file</h2>
+  <p class="muted">Accepted formats: <code>.xlsx</code> or <code>.csv</code>. Required columns:</p>
+  <table style="margin-bottom:14px">
+    <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>MW</code></td><td>number</td><td>Real power output</td></tr>
+      <tr><td><code>Current_A</code></td><td>number</td><td>Stator current, amps</td></tr>
+      <tr><td><code>Power_Factor</code></td><td>number</td><td>0–1</td></tr>
+      <tr><td><code>Voltage_kV</code></td><td>number</td><td>Terminal voltage, kV</td></tr>
+      <tr><td><code>Trip_Risk</code></td><td>text</td><td>The label to predict — any set of category names works</td></tr>
+      <tr><td><code>Timestamp</code> or <code>Date</code></td><td>date</td><td>Optional — synthesized sequentially if both are missing</td></tr>
+    </tbody>
+  </table>
+
+  <div class="field-row">
+    <div class="field">
+      <label for="rated-mw">Rated capacity (MW)</label>
+      <input type="number" id="rated-mw" value="{{ rated_mw }}" step="0.1">
+    </div>
+    <div class="field">
+      <label for="rated-kv">Nominal voltage (kV)</label>
+      <input type="number" id="rated-kv" value="{{ rated_kv }}" step="0.1">
+    </div>
+  </div>
+  <p class="muted" style="font-size:11.5px">These feed the physics engine (Load % and Voltage Deviation %) — set them to match the unit your data comes from.</p>
+
+  <div class="field">
+    <label for="file-input">Dataset file</label>
+    <input type="file" id="file-input" accept=".xlsx,.csv">
+  </div>
+
+  <div style="display:flex; gap:10px">
+    <button id="upload-btn">Upload &amp; validate</button>
+    <button id="reset-btn" class="secondary">Reset to bundled sample</button>
+  </div>
+
+  <div id="upload-status" style="margin-top:16px"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function badgeForRisk(cls) {
+  var upper = (cls || "").toUpperCase();
+  if (upper.indexOf("NORMAL") !== -1) return "badge-normal";
+  if (upper.indexOf("WARN") !== -1) return "badge-warning";
+  return "badge-high";
+}
+
+document.getElementById("upload-btn").addEventListener("click", function () {
+  var fileInput = document.getElementById("file-input");
+  var statusEl = document.getElementById("upload-status");
+  if (!fileInput.files.length) {
+    statusEl.innerHTML = '<div class="callout danger">Choose a file first.</div>';
+    return;
+  }
+  var fd = new FormData();
+  fd.append("file", fileInput.files[0]);
+  fd.append("rated_mw", document.getElementById("rated-mw").value);
+  fd.append("rated_kv", document.getElementById("rated-kv").value);
+
+  statusEl.innerHTML = '<span class="spinner"></span>Validating and loading...';
+
+  fetch("/api/upload", { method: "POST", body: fd }).then(function (res) {
+    return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+  }).then(function (result) {
+    if (!result.ok) {
+      statusEl.innerHTML = '<div class="callout danger"><strong>Upload failed:</strong> ' + result.data.error + '</div>';
+      return;
+    }
+    var data = result.data;
+    var warnHtml = "";
+    if (data.warnings && data.warnings.length) {
+      warnHtml = '<div class="callout warn"><strong>Notes:</strong><ul style="margin:6px 0 0 18px; padding:0">' +
+        data.warnings.map(function (w) { return "<li>" + w + "</li>"; }).join("") + "</ul></div>";
+    }
+    var classesHtml = data.classes_detected.map(function (c) {
+      return '<span class="badge ' + badgeForRisk(c) + '" style="margin-right:6px">' + c + "</span>";
+    }).join("");
+    statusEl.innerHTML =
+      '<div class="callout" style="border-color:#4ecb71; background:rgba(78,203,113,0.08)"><strong>Loaded successfully.</strong> ' +
+      data.health.n_observations + " observations, " + data.health.n_days + " days.</div>" +
+      warnHtml +
+      '<p class="muted">Detected classes: ' + classesHtml + '</p>' +
+      '<p class="muted">Previously trained models were cleared since they were fit on the old data — visit <a href="/train" style="color:var(--accent)">Train models</a> to retrain.</p>';
+    document.getElementById("current-source").textContent = data.health.source_label;
+  }).catch(function (err) {
+    statusEl.innerHTML = '<div class="callout danger">Upload failed: ' + err + '</div>';
+  });
+});
+
+document.getElementById("reset-btn").addEventListener("click", function () {
+  var statusEl = document.getElementById("upload-status");
+  statusEl.innerHTML = '<span class="spinner"></span>Resetting...';
+  postJSON("/api/upload/reset", {}).then(function (data) {
+    statusEl.innerHTML = '<div class="callout">Reset to the bundled sample dataset (' + data.health.n_observations + ' observations).</div>';
+    document.getElementById("current-source").textContent = data.health.source_label;
+    document.getElementById("rated-mw").value = 3.0;
+    document.getElementById("rated-kv").value = 11.0;
+  });
+});
+</script>
+{% endblock %}

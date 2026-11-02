@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Access denied — AI Relay Monitor{% endblock %}
+{% block content %}
+<h1>Access denied</h1>
+<div class="callout danger">This page needs the <strong>{{ need }}</strong> role. Your role is <strong>{{ current_user.role }}</strong>. Ask an administrator to change it.</div>
+{% endblock %}

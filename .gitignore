@@ -1,0 +1,38 @@
+__pycache__/
+*.pyc
+venv/
+.venv/
+models/*.joblib
+data/active_dataset.xlsx
+data/events.db
+.vscode/settings.json
+.DS_Store
+data/users.db
+data/.secret_key
+models/last_train.json
+# IDE configuration
+.vscode/
+.idea/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+
+# Sensitive files
+.env
+.env.*
+data/.secret_key
+data/users.db
+data/events.db
+
+# Local datasets
+data/active_dataset.xlsx
+
+
+# Generated machine learning models
+models/*.joblib
+models/last_train.json

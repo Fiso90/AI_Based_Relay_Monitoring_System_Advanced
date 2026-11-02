@@ -1,5 +1,5 @@
 """
-Central configuration for the 3 MW Alternator ML Lifecycle Dashboard.
+Central configuration for the AI-Based Relay Monitor System.
 
 Keeping every constant here means the EDA, CDA, feature engineering, and
 modeling modules never redefine or accidentally drift on shared numbers
@@ -9,7 +9,14 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_PATH = os.path.join(BASE_DIR, "data", "alternator_data.xlsx")
-MODEL_DIR = os.path.join(BASE_DIR, "models")
+# Runtime (writable) state -- users, events, uploaded dataset, secret key, trained
+# models. By default these live in the project's data/ and models/ folders. For
+# cloud hosting set PERSIST_DIR to a mounted persistent volume (e.g. /var/data)
+# and everything writable moves there, while the bundled sample stays in the repo.
+PERSIST_DIR = os.environ.get("PERSIST_DIR")
+RUNTIME_DATA_DIR = os.path.join(PERSIST_DIR, "data") if PERSIST_DIR else os.path.join(BASE_DIR, "data")
+MODEL_DIR = os.path.join(PERSIST_DIR, "models") if PERSIST_DIR else os.path.join(BASE_DIR, "models")
+os.makedirs(RUNTIME_DATA_DIR, exist_ok=True)
 DATA_SHEET = "Alternator_Data"
 
 os.makedirs(MODEL_DIR, exist_ok=True)

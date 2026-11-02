@@ -1,0 +1,28 @@
+{% extends "_auth_base.html" %}
+{% block title %}Register{% endblock %}
+{% block body %}
+<h1 style="font-size:20px">Create an account</h1>
+{% if first_run %}
+<div class="callout">You are the first user, so this account will be the <strong>administrator</strong>.</div>
+{% else %}
+<p class="muted" style="margin-top:0">New accounts start as <strong>viewer</strong> (read-only). An administrator can grant operator or admin rights.</p>
+{% endif %}
+{% if error %}<div class="callout danger" role="alert">{{ error }}</div>{% endif %}
+<form method="post" action="{{ url_for('register') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field"><label for="full_name">Full name</label>
+    <input class="text-input" id="full_name" name="full_name" value="{{ form.get('full_name','') }}" autocomplete="name"></div>
+  <div class="field"><label for="username">Username</label>
+    <input class="text-input" id="username" name="username" value="{{ form.get('username','') }}" required pattern="[A-Za-z0-9_.\-]{3,32}" autocomplete="username"></div>
+  <div class="field"><label for="email">Email</label>
+    <input class="text-input" id="email" name="email" type="email" value="{{ form.get('email','') }}" required autocomplete="email"></div>
+  <div class="field-row">
+    <div class="field"><label for="password">Password (min 8)</label>
+      <input class="text-input" id="password" name="password" type="password" required minlength="8" autocomplete="new-password"></div>
+    <div class="field"><label for="confirm">Confirm</label>
+      <input class="text-input" id="confirm" name="confirm" type="password" required minlength="8" autocomplete="new-password"></div>
+  </div>
+  <button type="submit" style="width:100%">Register</button>
+</form>
+<p class="muted" style="margin-top:16px">Already registered? <a href="{{ url_for('login') }}">Sign in</a></p>
+{% endblock %}

@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Report — AI Relay Monitor{% endblock %}
+{% block content %}
+<div class="no-print">
+  <h1>Reports &amp; print</h1>
+  <p class="page-sub">A formatted report of the current dataset, protection rules, model evaluation and alarm history. Use <strong>Print</strong>, then choose &ldquo;Save as PDF&rdquo; as the destination to export a PDF.</p>
+  <form method="get" class="card report-opts">
+    <div class="field-row" style="align-items:flex-end">
+      <div class="field" style="flex:2"><label>Include sections</label>
+        <label class="chk"><input type="checkbox" name="data" value="1" {{ 'checked' if sections.data }}> Dataset &amp; statistics</label>
+        <label class="chk"><input type="checkbox" name="rules" value="1" {{ 'checked' if sections.rules }}> Protection setpoints</label>
+        <label class="chk"><input type="checkbox" name="models" value="1" {{ 'checked' if sections.models }}> Model evaluation</label>
+        <label class="chk"><input type="checkbox" name="events" value="1" {{ 'checked' if sections.events }}> Alarm &amp; event log</label>
+      </div>
+      <div class="field"><label for="ev">Events to list</label>
+        <select id="ev" name="n">
+          {% for n in (25, 50, 100, 250, 500) %}<option value="{{ n }}" {{ 'selected' if n == event_limit }}>last {{ n }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field"><button type="submit" class="secondary">Update</button></div>
+    </div>
+  </form>
+  <div style="display:flex;gap:10px;margin:14px 0 22px;flex-wrap:wrap">
+    <button type="button" onclick="window.print()">&#128424; Print / Save as PDF</button>
+    <a href="{{ url_for('report_events_csv') }}"><button type="button" class="secondary">Download event log (CSV)</button></a>
+  </div>
+</div>
+
+<article class="report">
+  <header class="report-head">
+    <div>
+      <div class="report-kicker">AI-Based Relay Monitor System</div>
+      <h1 class="report-title">3 MW Alternator &mdash; Protection Monitoring Report</h1>
+    </div>
+    <table class="report-meta">
+      <tr><td>Generated</td><td>{{ r.generated }}</td></tr>
+      <tr><td>Prepared by</td><td>{{ current_user.full_name or current_user.username }} ({{ current_user.role }})</td></tr>
+      <tr><td>Dataset</td><td>{{ r.health.source_label }}</td></tr>
+      <tr><td>Rating</td><td>{{ r.rated_mw }} MW &middot; {{ r.rated_kv }} kV</td></tr>
+    </table>
+  </header>
+
+  <section class="report-summary">
+    <div class="rs-item"><div class="rs-val">{{ r.health.n_observations }}</div><div class="rs-lbl">Observations</div></div>
+    <div class="rs-item"><div class="rs-val">{{ r.event_total }}</div><div class="rs-lbl">Logged evaluations</div></div>
+    <div class="rs-item"><div class="rs-val {{ 'txt-red' if r.unacknowledged }}">{{ r.unacknowledged }}</div><div class="rs-lbl">Unacknowledged alarms</div></div>
+    <div class="rs-item"><div class="rs-val">{{ r.ranked[0][0] if r.ranked else 'n/a' }}</div><div class="rs-lbl">Best model{% if r.ranked %} ({{ '%.1f'|format(r.ranked[0][1].f1_weighted*100) }}% F1){% endif %}</div></div>
+  </section>
+
+  {% if sections.data %}
+  <section>
+    <h2>1. Dataset &amp; statistics</h2>
+    <p>{{ r.health.n_observations }} observations from {{ r.health.date_min }} to {{ r.health.date_max }} ({{ r.health.n_days }} days).
+       Missing values: {{ r.health.missing_values }}; duplicate rows: {{ r.health.duplicate_rows }}.</p>
+    <table>
+      <thead><tr><th>Class</th><th>Count</th><th>Share</th></tr></thead>
+      <tbody>{% for k, v in r.health.class_counts.items() %}
+        <tr><td><span class="badge {{ 'badge-normal' if k=='NORMAL' else ('badge-warning' if k=='WARNING' else 'badge-high') }}">{{ k }}</span></td><td>{{ v }}</td><td>{{ '%.1f'|format(v / r.health.n_observations * 100) }}%</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    <h3 style="margin-top:14px">Descriptive statistics</h3>
+    <table>
+      <thead><tr><th>Feature</th><th>Mean</th><th>Std</th><th>Min</th><th>Median</th><th>Max</th><th>Skew</th></tr></thead>
+      <tbody>{% for s in r.stats %}
+        <tr><td>{{ s.feature }}</td><td>{{ s['mean'] }}</td><td>{{ s.std }}</td><td>{{ s['min'] }}</td><td>{{ s['50%'] }}</td><td>{{ s['max'] }}</td><td>{{ s.skew }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if sections.rules %}
+  <section>
+    <h2>2. Protection setpoints</h2>
+    <p>Each channel scores 0 (normal), 1 (warning) or 2 (high). A total &ge; 2 is HIGH TRIP RISK; 1 is WARNING.</p>
+    <table>
+      <thead><tr><th>Channel</th><th>Normal limit</th><th>Warning limit</th></tr></thead>
+      <tbody>{% for ch, sp in r.setpoints.items() %}
+        <tr><td>{{ ch }}</td>
+        <td>{% if sp.normal_max is defined %}&le; {{ sp.normal_max }}{% else %}&ge; {{ sp.normal_min }}{% endif %}</td>
+        <td>{% if sp.warning_max is defined %}&le; {{ sp.warning_max }}{% else %}&ge; {{ sp.warning_min }}{% endif %}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if sections.models %}
+  <section>
+    <h2>3. Model evaluation</h2>
+    {% if r.artifact %}
+    <p>Last training run{% if r.trained_at %}: {{ r.trained_at }}{% endif %}. Split: {{ r.artifact.split_strategy }}, {{ r.artifact.n_train }} train / {{ r.artifact.n_test }} test.
+       Hyperparameter search: {{ 'on' if r.artifact.optimized else 'off' }}. Models deployed: {{ 'yes' if r.models_deployed else 'no' }}.</p>
+    <table>
+      <thead><tr><th>#</th><th>Model</th><th>Accuracy</th><th>Precision (w)</th><th>Recall (w)</th><th>F1 (w)</th><th>F1 (macro)</th><th>ROC-AUC</th></tr></thead>
+      <tbody>{% for name, m in r.ranked %}
+        <tr {% if loop.first %}class="best-row"{% endif %}><td>{{ loop.index }}</td><td>{{ name }}{% if loop.first %} &#9733;{% endif %}</td>
+        <td>{{ '%.2f'|format(m.accuracy*100) }}%</td><td>{{ '%.2f'|format(m.precision_weighted*100) }}%</td><td>{{ '%.2f'|format(m.recall_weighted*100) }}%</td>
+        <td>{{ '%.2f'|format(m.f1_weighted*100) }}%</td><td>{{ '%.2f'|format(m.f1_macro*100) }}%</td>
+        <td>{{ '%.3f'|format(m.roc_auc_macro) if m.roc_auc_macro is not none else '—' }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% set best = r.ranked[0][1] %}
+    <div class="grid-2" style="margin-top:14px">
+      <div>
+        <h3>Confusion matrix &mdash; {{ r.ranked[0][0] }}</h3>
+        <table>
+          <thead><tr><th>Actual \ Predicted</th>{% for l in best.labels %}<th>{{ l }}</th>{% endfor %}</tr></thead>
+          <tbody>{% for row in best.confusion_matrix %}{% set i = loop.index0 %}
+            <tr><td><strong>{{ best.labels[i] }}</strong></td>{% for v in row %}<td {% if loop.index0 == i %}class="cm-diag"{% endif %}>{{ v }}</td>{% endfor %}</tr>
+          {% endfor %}</tbody>
+        </table>
+      </div>
+      <div>
+        <h3>Per-class results &mdash; {{ r.ranked[0][0] }}</h3>
+        <table>
+          <thead><tr><th>Class</th><th>Precision</th><th>Recall</th><th>F1</th><th>Support</th></tr></thead>
+          <tbody>{% for l in best.labels %}{% set c = best.report[l] %}
+            <tr><td>{{ l }}</td><td>{{ '%.2f'|format(c.precision*100) }}%</td><td>{{ '%.2f'|format(c.recall*100) }}%</td><td>{{ '%.2f'|format(c['f1-score']*100) }}%</td><td>{{ c.support|int }}</td></tr>
+          {% endfor %}</tbody>
+        </table>
+      </div>
+    </div>
+    <h3 style="margin-top:14px">Feature importance (Random Forest)</h3>
+    <table>
+      <thead><tr><th>Feature</th><th>Importance</th><th style="width:50%"></th></tr></thead>
+      <tbody>{% set top = r.artifact.feature_importance.values()|max %}
+        {% for f, v in r.artifact.feature_importance.items() %}
+        <tr><td>{{ f }}</td><td>{{ '%.3f'|format(v) }}</td><td><div class="bar"><span style="width:{{ (v / top * 100)|round(1) if top else 0 }}%"></span></div></td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% else %}
+    <div class="callout">No models have been trained yet. An administrator can train them from <em>Train models</em>.</div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if sections.events %}
+  <section>
+    <h2>4. Alarm &amp; event log</h2>
+    <p>{{ r.event_total }} evaluation(s) logged.
+      {% for k, v in r.event_counts.items() %}{{ k }}: {{ v }}{{ ', ' if not loop.last }}{% endfor %}.
+      Showing the {{ r.events|length }} most recent.</p>
+    {% if r.events %}
+    <table class="events-table">
+      <thead><tr><th>Time</th><th>Severity</th><th>MW</th><th>I (A)</th><th>PF</th><th>V (kV)</th><th>ML</th><th>Action</th><th>Ack</th></tr></thead>
+      <tbody>{% for e in r.events %}
+        <tr><td>{{ e.time_str }}</td>
+        <td><span class="badge {{ 'badge-normal' if e.severity=='NORMAL' else ('badge-warning' if e.severity=='WARNING' else 'badge-high') }}">{{ e.severity }}</span></td>
+        <td>{{ e.inputs.mw }}</td><td>{{ e.inputs.current_a }}</td><td>{{ e.inputs.power_factor }}</td><td>{{ e.inputs.voltage_kv }}</td>
+        <td>{{ e.predicted_label or '—' }}</td><td>{{ e.recommended_action }}</td><td>{{ '✓' if e.acknowledged else '' }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% else %}<div class="callout">No events have been logged yet.</div>{% endif %}
+  </section>
+  {% endif %}
+
+  <footer class="report-foot">
+    Generated by AI-Based Relay Monitor System on {{ r.generated }}. This report supports, and does not replace, the protection relay and engineering judgement.
+  </footer>
+</article>
+{% endblock %}

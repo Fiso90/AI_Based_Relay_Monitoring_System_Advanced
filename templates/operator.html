@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}Operator Dashboard — AI Relay Monitor{% endblock %}
+{% block content %}
+<h1>Operator dashboard</h1>
+<div class="no-print" style="float:right;margin-top:-34px"><a href="{{ url_for('report_page') }}"><button type="button" class="secondary">&#128424; Print report</button></a></div>
+<p class="page-sub">The fused view an operator actually uses: one decision, built from engineering protection rules, AI anomaly detection, and the trained ML ensemble — with full explainability, alarm history, and live monitoring.</p>
+
+<div class="tabs" data-tabs>
+  <button class="tab-btn active" data-tab="live">Live decision</button>
+  <button class="tab-btn" data-tab="history">Event history</button>
+  <button class="tab-btn" data-tab="monitoring">Monitoring</button>
+</div>
+
+<!-- ===================== LIVE DECISION ===================== -->
+<div class="tab-panel active" data-panel="live">
+  <div id="verdict-banner" class="verdict-banner verdict-normal">
+    <div class="verdict-severity">AWAITING INPUT</div>
+    <div class="verdict-action muted">Run a manual reading or start the simulated telemetry feed below.</div>
+  </div>
+
+  <div class="grid grid-2" style="margin-top:16px">
+    <div class="card">
+      <h2>Manual telemetry input</h2>
+      <div class="field"><label>MW output</label><input type="number" id="in-mw" value="1.9" step="0.01"></div>
+      <div class="field"><label>Stator current (A)</label><input type="number" id="in-current" value="112" step="0.1"></div>
+      <div class="field"><label>Power factor</label><input type="number" id="in-pf" value="0.88" step="0.01" min="0" max="1"></div>
+      <div class="field"><label>Voltage (kV)</label><input type="number" id="in-voltage" value="10.9" step="0.01"></div>
+      <button id="evaluate-btn">Run decision engine</button>
+    </div>
+
+    <div class="card">
+      <h2>Simulated telemetry feed</h2>
+      <p class="muted" style="margin-top:0">Steps through real rows from the active dataset, one at a time, as if they were arriving live.</p>
+      <div style="display:flex; gap:10px; margin-bottom:12px">
+        <button id="sim-step-btn" class="secondary">Step once</button>
+        <button id="sim-play-btn" class="secondary">▶ Auto-play (2s)</button>
+      </div>
+      <div id="sim-status" class="muted" style="font-size:11.5px">Not running.</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>Decision breakdown</h2>
+    <div id="breakdown-content" class="muted">Run a reading to see the fused explainability breakdown.</div>
+  </div>
+</div>
+
+<!-- ===================== EVENT HISTORY ===================== -->
+<div class="tab-panel" data-panel="history">
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px">
+      <h2 style="margin:0">Event log</h2>
+      <div style="display:flex; gap:8px">
+        <select id="history-filter">
+          <option value="">All severities</option>
+          <option value="CRITICAL">Critical only</option>
+          <option value="WARNING">Warning only</option>
+          <option value="NORMAL">Normal only</option>
+        </select>
+        <button id="history-refresh" class="secondary">Refresh</button>
+        <button id="history-clear" class="secondary">Clear log</button>
+      </div>
+    </div>
+    <div id="history-table" style="margin-top:14px">Loading…</div>
+  </div>
+</div>
+
+<!-- ===================== MONITORING ===================== -->
+<div class="tab-panel" data-panel="monitoring">
+  <div class="card">
+    <h2>Model &amp; data drift monitoring</h2>
+    <p class="muted">Compares the severity mix of recently logged events against the training dataset's own class distribution. A large shift is a plain-language proxy for drift — live conditions no longer resemble what the models were evaluated on.</p>
+    <div id="monitoring-content">Loading…</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function severityClass(sev) {
+  if (sev === "CRITICAL") return "verdict-critical";
+  if (sev === "WARNING") return "verdict-warning";
+  if (sev === "NORMAL") return "verdict-normal";
+  return "verdict-normal";
+}
+function badgeForSeverity(sev) {
+  if (sev === "CRITICAL") return "badge-high";
+  if (sev === "WARNING") return "badge-warning";
+  return "badge-normal";
+}
+
+function renderVerdict(data) {
+  var banner = document.getElementById("verdict-banner");
+  banner.className = "verdict-banner " + severityClass(data.overall_severity);
+  banner.innerHTML =
+    '<div class="verdict-severity">' + data.overall_severity + (data.agreement ? '' : ' <span style="font-size:11px; font-weight:600">(signals disagree)</span>') + '</div>' +
+    '<div class="verdict-action">' + data.recommended_action + '</div>';
+
+  var b = data.rule_based, a = data.anomaly, m = data.ml;
+  var mlBlock = data.ml_available
+    ? '<div class="card"><h3>AI risk prediction</h3><span class="badge ' + badgeForSeverity(m.severity) + '">' + m.predicted_label + '</span>' +
+      (m.confidence !== null ? '<p class="muted" style="margin-top:6px">Confidence: ' + (m.confidence * 100).toFixed(1) + '%</p>' : '') + '</div>'
+    : '<div class="card"><h3>AI risk prediction</h3><p class="muted">No trained models yet — train on the Train models page.</p></div>';
+
+  document.getElementById("breakdown-content").innerHTML =
+    '<div class="grid grid-3">' +
+    '<div class="card"><h3>Engineering protection rules</h3><span class="badge ' + badgeForSeverity(b.severity) + '">' + b.severity + '</span>' +
+    (b.reasons.length ? '<ul style="margin:8px 0 0 16px; padding:0; font-size:11.5px">' + b.reasons.map(function(r){return "<li>"+r+"</li>";}).join("") + '</ul>' : '<p class="muted" style="margin-top:6px">No thresholds breached.</p>') +
+    '</div>' +
+    '<div class="card"><h3>AI anomaly detection</h3>' +
+    (data.anomaly_available
+      ? '<span class="badge ' + badgeForSeverity(a.severity) + '">' + a.severity + '</span><p class="muted" style="margin-top:6px">Score: ' + a.score + ' — ' + a.note + '</p>'
+      : '<p class="muted">Not trained yet — visit Train models.</p>') +
+    '</div>' +
+    mlBlock +
+    '</div>';
+}
+
+document.getElementById("evaluate-btn").addEventListener("click", function () {
+  var payload = {
+    mw: parseFloat(document.getElementById("in-mw").value),
+    current_a: parseFloat(document.getElementById("in-current").value),
+    power_factor: parseFloat(document.getElementById("in-pf").value),
+    voltage_kv: parseFloat(document.getElementById("in-voltage").value),
+    source: "manual",
+  };
+  postJSON("/api/decision/evaluate", payload).then(renderVerdict);
+});
+
+var simTimer = null;
+function simStepOnce() {
+  return postJSON("/api/telemetry/simulate_next", {}).then(function (data) {
+    renderVerdict(data);
+    document.getElementById("sim-status").textContent =
+      "Row #" + data.source_row_index + " — dataset label: " + data.actual_label + " — AI overall: " + data.overall_severity;
+  });
+}
+document.getElementById("sim-step-btn").addEventListener("click", simStepOnce);
+document.getElementById("sim-play-btn").addEventListener("click", function () {
+  var btn = document.getElementById("sim-play-btn");
+  if (simTimer) {
+    clearInterval(simTimer);
+    simTimer = null;
+    btn.textContent = "▶ Auto-play (2s)";
+    document.getElementById("sim-status").textContent = "Stopped.";
+  } else {
+    simTimer = setInterval(simStepOnce, 2000);
+    btn.textContent = "■ Stop";
+    simStepOnce();
+  }
+});
+
+// ---------------- Event history ----------------
+function loadHistory() {
+  var sev = document.getElementById("history-filter").value;
+  var url = "/api/events?limit=50" + (sev ? "&severity=" + sev : "");
+  return getJSON(url).then(function (events) {
+    if (!events.length) {
+      document.getElementById("history-table").innerHTML = '<p class="muted">No events logged yet — run a decision on the Live decision tab.</p>';
+      return;
+    }
+    var html = "<table><thead><tr><th>Time</th><th>Source</th><th>Severity</th><th>Prediction</th><th>Confidence</th><th>Anomaly</th><th>Ack</th></tr></thead><tbody>";
+    events.forEach(function (e) {
+      html += "<tr" + (e.acknowledged ? ' style="opacity:0.55"' : "") + ">" +
+        "<td>" + e.time_str + "</td><td>" + e.source + "</td>" +
+        "<td><span class='badge " + badgeForSeverity(e.severity) + "'>" + e.severity + "</span></td>" +
+        "<td>" + (e.predicted_label || "—") + "</td>" +
+        "<td>" + (e.confidence !== null ? (e.confidence * 100).toFixed(1) + "%" : "—") + "</td>" +
+        "<td>" + e.anomaly_score + "</td>" +
+        "<td>" + (e.acknowledged ? "✓" : '<button class="secondary ack-btn" data-id="' + e.id + '" style="padding:4px 10px; font-size:11px">Ack</button>') + "</td>" +
+        "</tr>";
+    });
+    html += "</tbody></table>";
+    document.getElementById("history-table").innerHTML = html;
+    document.querySelectorAll(".ack-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        postJSON("/api/events/" + btn.dataset.id + "/acknowledge", {}).then(loadHistory);
+      });
+    });
+  });
+}
+document.getElementById("history-refresh").addEventListener("click", loadHistory);
+document.getElementById("history-filter").addEventListener("change", loadHistory);
+document.getElementById("history-clear").addEventListener("click", function () {
+  postJSON("/api/events/clear", {}).then(loadHistory);
+});
+
+// ---------------- Monitoring ----------------
+function loadMonitoring() {
+  return getJSON("/api/monitoring/summary").then(function (data) {
+    var labels = Object.keys(Object.assign({}, data.baseline_distribution_pct, data.recent_distribution_pct));
+    var rows = labels.map(function (l) {
+      return "<tr><td>" + l + "</td><td>" + (data.baseline_distribution_pct[l] || 0) + "%</td>" +
+        "<td>" + (data.recent_distribution_pct[l] !== undefined ? data.recent_distribution_pct[l] + "%" : "—") + "</td>" +
+        "<td>" + (data.drift_pp_shift[l] > 0 ? "+" : "") + data.drift_pp_shift[l] + " pp</td></tr>";
+    }).join("");
+    document.getElementById("monitoring-content").innerHTML =
+      '<div class="grid grid-2" style="margin-bottom:14px">' +
+      '<div class="card stat-card"><div class="stat-label">Recent logged events</div><div class="stat-value">' + data.recent_event_count + '</div></div>' +
+      '<div class="card stat-card"><div class="stat-label">Models deployed</div><div class="stat-value" style="font-size:20px">' + (data.models_deployed ? "Yes" : "No") + '</div></div>' +
+      '</div>' +
+      '<table><thead><tr><th>Class</th><th>Training baseline %</th><th>Recent events %</th><th>Shift</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  });
+}
+
+document.querySelector('[data-tabs]').addEventListener("tabchange", function (ev) {
+  if (ev.detail.tab === "history") loadHistory();
+  if (ev.detail.tab === "monitoring") loadMonitoring();
+});
+</script>
+{% endblock %}

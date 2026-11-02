@@ -9,6 +9,7 @@ classic EDA/CDA distinction (Tukey's exploratory vs. confirmatory analysis).
 import numpy as np
 import pandas as pd
 from . import config
+from . import state
 
 NUMERIC_COLS = config.RAW_FEATURES + config.ENGINEERED_FEATURES
 
@@ -42,15 +43,16 @@ def boxplot_by_class(df: pd.DataFrame, feature: str) -> dict:
     if feature not in NUMERIC_COLS:
         raise ValueError(f"Unknown feature: {feature}")
     out = {}
-    for cls in config.CLASSES:
+    for cls in state.get_classes():
         vals = df.loc[df[config.TARGET] == cls, feature].dropna()
         out[cls] = vals.tolist()
     return out
 
 
 def class_balance(df: pd.DataFrame) -> dict:
+    classes = state.get_classes()
     counts = df[config.TARGET].value_counts()
-    counts = counts.reindex(config.CLASSES).fillna(0).astype(int)
+    counts = counts.reindex(classes).fillna(0).astype(int)
     return {"labels": counts.index.tolist(), "counts": counts.values.tolist()}
 
 
